@@ -80,18 +80,19 @@ def get_lecture_summary(lecture: int) -> str:
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
 
-
 def search_materials(query: str) -> str:
     """第1〜3回の本講義資料を検索し、関連ページの本文・タイトル・ページ番号を返す。
 
     queryに調べたい内容を指定する。
     """
     from google.genai.errors import APIError
+    import os
     import sqlite3
-    from app.retrieval import search
+    from app.retrieval import search, search_with_neighbors
 
+    find = search_with_neighbors if os.getenv("AIE_NEIGHBORS") == "1" else search
     try:
-        return json.dumps({"results": search(query)}, ensure_ascii=False)
+        return json.dumps({"results": find(query)}, ensure_ascii=False)
     except (ValueError, FileNotFoundError, sqlite3.Error) as e:
         return json.dumps({"error": str(e), "results": []}, ensure_ascii=False)
     except APIError as e:
