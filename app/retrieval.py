@@ -17,7 +17,7 @@ import sqlite_vec
 from app.config import (
     EMBEDDING_DIMENSIONS, EMBEDDING_MAX_TOKENS, EMBEDDING_MODEL,
     RAG_DB, RAG_DOCUMENT_IDS, RAG_SOURCE, RAG_TOP_K, RAG_TREE, get_api_key,
-    RAG_GRAPH, GRAPH_START_K, GRAPH_HOPS, GRAPH_MAX_RESULTS,
+    RAG_GRAPH, GRAPH_START_K, GRAPH_HOPS, GRAPH_MAX_RESULTS,GRAPH_RELATIONS
 )
 
 
@@ -137,6 +137,31 @@ def search(query: str) -> list[dict]:
         """, (sqlite_vec.serialize_float32(vector), RAG_TOP_K))
         return [dict(row) for row in rows]
 
+def search_with_neighbors(query: str) -> list[dict]:
+    """検索ヒットの前後1ページ（同じ資料内）も付けて返す。重複なし。"""
+    hits = search(query)
+    pages = load_pages(RAG_SOURCE)
+    position = {p["page_id"]: i for i, p in enumerate(pages)}
+    results, seen = [], set()
+
+    def add(page: dict, role: str, distance=None):
+        if page["page_id"] in seen:
+            return
+        seen.add(page["page_id"])
+        results.append({**page, "distance": distance, "role": role})
+
+    for hit in hits:                       # まずヒット本体（順位を保つ）
+        add(hit, "hit", hit["distance"])
+    for hit in hits:                       # 次に前後ページ
+        i = position.get(hit["page_id"])
+        if i is None:
+            continue
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(pages) and pages[j]["document_id"] == hit["document_id"]:
+                add(pages[j], "neighbor")
+    return results
+
+
 
 def search_graph(query: str) -> dict:
     """ベクトル検索を入口に、前後ページと共通用語で候補を広げる。"""
@@ -147,7 +172,7 @@ def search_graph(query: str) -> dict:
     adjacent = defaultdict(set)
     for edge in graph["edges"]:
         a, b = edge["source"], edge["target"]
-        if edge["relation"] in ("next_page", "mentions") and a in nodes and b in nodes:
+        if edge["relation"] in GRAPH_RELATIONS and a in nodes and b in nodes:
             adjacent[a].add(b)
             adjacent[b].add(a)
 
